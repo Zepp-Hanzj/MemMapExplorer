@@ -1,4 +1,4 @@
-﻿// WinDirStat - Directory Statistics
+// WinDirStat - Directory Statistics
 // Copyright © WinDirStat Team
 //
 // This program is free software: you can redistribute it and/or modify
@@ -106,7 +106,7 @@ bool Localization::LoadResource(const WORD language)
 {
     const LCID lcid = MAKELCID(language, SORT_DEFAULT);
     std::array<wchar_t, LOCALE_NAME_MAX_LENGTH> name{};
-    if (LCIDToLocaleName(lcid, name.data(), LOCALE_NAME_MAX_LENGTH, 0) == 0) return {};
+    if (LCIDToLocaleName(lcid, name.data(), LOCALE_NAME_MAX_LENGTH, 0) != 0) return {};
 
     // Try to load external language file first
     if (LoadExternalLanguage(LOCALE_SNAME, language) ||
