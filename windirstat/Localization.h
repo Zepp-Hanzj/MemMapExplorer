@@ -35,7 +35,6 @@ public:
 
     static bool Contains(const std::wstring_view name)
     {
-        ASSERT(m_map.contains(name));
         return m_map.contains(name);
     }
 

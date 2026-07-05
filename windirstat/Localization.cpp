@@ -1,4 +1,4 @@
-// WinDirStat - Directory Statistics
+﻿// WinDirStat - Directory Statistics
 // Copyright © WinDirStat Team
 //
 // This program is free software: you can redistribute it and/or modify
@@ -105,17 +105,17 @@ std::set<LANGID> Localization::GetLanguageList()
 bool Localization::LoadResource(const WORD language)
 {
     const LCID lcid = MAKELCID(language, SORT_DEFAULT);
-    std::array<wchar_t, LOCALE_NAME_MAX_LENGTH> name{};
-    if (LCIDToLocaleName(lcid, name.data(), LOCALE_NAME_MAX_LENGTH, 0) != 0) return {};
 
     // Try to load external language file first
-    if (LoadExternalLanguage(LOCALE_SNAME, language) ||
-        LoadExternalLanguage(LOCALE_SISO639LANGNAME, language)) return true;
+    if (LoadExternalLanguage(LOCALE_SNAME, lcid) ||
+        LoadExternalLanguage(LOCALE_SISO639LANGNAME, lcid)) return true;
 
     // Try to load built-in resource
     const std::wstring sResourceData = GetTextResource(IDR_LANGS);
-    return CrackStrings(sResourceData, GetLocaleString(LOCALE_SNAME, language)) ||
-        CrackStrings(sResourceData, GetLocaleString(LOCALE_SISO639LANGNAME, language));
+    const auto sname = GetLocaleString(LOCALE_SNAME, lcid);
+    const auto siso = GetLocaleString(LOCALE_SISO639LANGNAME, lcid);
+    return (!sname.empty() && CrackStrings(sResourceData, sname)) ||
+           (!siso.empty() && CrackStrings(sResourceData, siso));
 }
 
 void Localization::UpdateMenu(CMenu& menu)
