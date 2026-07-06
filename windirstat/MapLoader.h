@@ -42,7 +42,7 @@ std::vector<MapRegionInfo> GetMapRegions(const std::wstring& mapPath);
 CItem* LoadMapResults(const std::wstring& mapPath,
     const std::optional<std::wstring>& elfPath = std::nullopt,
     const std::optional<std::wstring>& selectedRegion = std::nullopt,
-    const std::function<void(const wchar_t*, int)>& progressCallback = {});
+    const std::function<void(const wchar_t*)>& progressCallback = {});
 void ClearMapItemDetails();
 const MapItemDetails* GetMapItemDetails(const CItem* item);
 void RemoveMapItemDetails(const CItem* root);

@@ -61,7 +61,7 @@ CItem* LoadImportedTree(const std::wstring& path)
         CProgressDlg(0, true, AfxGetMainWnd(), [&](CProgressDlg* dlg)
         {
             result = LoadMapResults(path, std::nullopt, selectedRegion,
-                [dlg](const wchar_t* msg, int) { if (dlg) dlg->SetMessage(msg); });
+                [dlg](const wchar_t* msg) { if (dlg) dlg->SetMessage(msg); });
         }).DoModal();
         return result;
     }
@@ -89,7 +89,7 @@ CItem* LoadImportedTree(const std::wstring& path)
         CProgressDlg(0, true, AfxGetMainWnd(), [&](CProgressDlg* dlg)
         {
             result = LoadMapResults(mapPath.wstring(), path, selectedRegion,
-                [dlg](const wchar_t* msg, int) { if (dlg) dlg->SetMessage(msg); });
+                [dlg](const wchar_t* msg) { if (dlg) dlg->SetMessage(msg); });
         }).DoModal();
         return result;
     }
@@ -568,7 +568,7 @@ void CDirStatApp::OnFileOpen()
         CProgressDlg(0, true, AfxGetMainWnd(), [&](CProgressDlg* dlg)
         {
             newroot = LoadMapResults(mapPath, elfPath, selectedRegion,
-                [dlg](const wchar_t* msg, int) { if (dlg) dlg->SetMessage(msg); });
+                [dlg](const wchar_t* msg) { if (dlg) dlg->SetMessage(msg); });
         }).DoModal();
     }
 

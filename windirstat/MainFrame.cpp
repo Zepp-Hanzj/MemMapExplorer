@@ -1612,7 +1612,7 @@ void CMainFrame::OnDiffCompare()
     CProgressDlg(0, true, AfxGetMainWnd(), [&](CProgressDlg* dlg)
     {
         newRoot = LoadMapResults(mapPath, elfPath, selectedRegion,
-            [dlg](const wchar_t* msg, int) { if (dlg) dlg->SetMessage(msg); });
+            [dlg](const wchar_t* msg) { if (dlg) dlg->SetMessage(msg); });
     }).DoModal();
     if (newRoot == nullptr)
     {

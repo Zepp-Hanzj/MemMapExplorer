@@ -1223,7 +1223,7 @@ void CDirStatDoc::OnLoadResults()
             newroot = LoadMapResults(path,
                 std::filesystem::exists(std::filesystem::path(elfPath)) ? std::optional<std::wstring>(elfPath) : std::nullopt,
                 selectedRegion,
-                [dlg](const wchar_t* msg, int) { if (dlg) dlg->SetMessage(msg); });
+                [dlg](const wchar_t* msg) { if (dlg) dlg->SetMessage(msg); });
             return;
         }
 

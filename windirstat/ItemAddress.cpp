@@ -35,8 +35,7 @@ bool CItemAddress::DrawSubItem(const int subitem, CDC* pdc, const CRect rc, cons
 
 std::wstring CItemAddress::GetText(const int subitem) const
 {
-    static std::wstring title = Localization::Lookup(IDS_HEX_ADDRESS_VIEW);
-    if (GetParent() == nullptr) return subitem == COL_ITEMADDR_NAME ? title : std::wstring{};
+    if (GetParent() == nullptr) return subitem == COL_ITEMADDR_NAME ? Localization::Lookup(IDS_HEX_ADDRESS_VIEW) : std::wstring{};
     if (m_item == nullptr) return {};
 
     switch (subitem)

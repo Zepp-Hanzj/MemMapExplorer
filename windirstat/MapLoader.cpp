@@ -24,6 +24,8 @@ std::unordered_map<const CItem*, std::wstring> g_mapItemSections;
 
 constexpr wchar_t MEMORY_CONFIG_HEADER[] = L"Memory Configuration";
 constexpr wchar_t MAP_HEADER[] = L"Linker script and memory map";
+constexpr wchar_t ARLINK_MAP_HEADER[] = L"Memory Map of the image";
+constexpr wchar_t ARLINK_SYMBOL_TABLE_HEADER[] = L"Image Symbol Table";
 
 constexpr std::uint8_t ELFCLASS32 = 1;
 constexpr std::uint8_t ELFCLASS64 = 2;
@@ -96,6 +98,23 @@ const std::wregex kArchiveRegex(
     std::regex_constants::optimize);
 const std::wregex kObjectRegex(
     LR"(^(.+?\.o)$)",
+    std::regex_constants::optimize);
+
+// ARM armlink MAP format regexes
+const std::wregex kArmlinkLoadRegionRegex(
+    LR"(^\s+Load Region\s+(\S+)\s+\(Base:\s+0x([0-9A-Fa-f]+),\s+Size:\s+0x([0-9A-Fa-f]+),)",
+    std::regex_constants::optimize);
+const std::wregex kArmlinkExecRegionRegex(
+    LR"(^\s+Execution Region\s+(\S+)\s+\(Exec base:\s+0x([0-9A-Fa-f]+),\s+Load base:\s+0x[0-9A-Fa-f]+,\s+Size:\s+0x([0-9A-Fa-f]+),)",
+    std::regex_constants::optimize);
+const std::wregex kArmlinkSectionPrefixRegex(
+    LR"(^\s+(0x[0-9A-Fa-f]+)\s+(0x[0-9A-Fa-f]+)\s+(0x[0-9A-Fa-f]+)\s+(Code|Data|Zero)\s+(RO|RW|ZI)\s+(\d+)\s+(\*?)\s*(.*)$)",
+    std::regex_constants::optimize);
+const std::wregex kArmlinkPadRegex(
+    LR"(^\s+(0x[0-9A-Fa-f]+)\s+(0x[0-9A-Fa-f]+)\s+(0x[0-9A-Fa-f]+)\s+PAD\s*$)",
+    std::regex_constants::optimize);
+const std::wregex kArmlinkLibObjectRegex(
+    LR"(^(.+\.l)\((.+)\)$)",
     std::regex_constants::optimize);
 
 constexpr std::wstring_view kIgnoredSectionPrefixes[] = {
@@ -238,6 +257,20 @@ struct ObjectBucket
 [[nodiscard]] ULONGLONG ParseHex(const std::wstring& value)
 {
     return wcstoull(value.c_str(), nullptr, 16);
+}
+
+[[nodiscard]] std::vector<std::wstring> SplitByMultiSpace(const std::wstring& input)
+{
+    std::vector<std::wstring> result;
+    std::wregex separator(LR"(\s{2,})");
+    std::wsregex_token_iterator it(input.begin(), input.end(), separator, -1);
+    std::wsregex_token_iterator end;
+    for (; it != end; ++it)
+    {
+        std::wstring part = it->str();
+        if (!part.empty()) result.push_back(std::move(part));
+    }
+    return result;
 }
 
 [[nodiscard]] std::vector<std::wstring> ReadAllLines(const std::wstring& path)
@@ -861,9 +894,133 @@ void AddDetailField(MapItemDetails& details, const std::wstring& label, const st
     return FindRegion(section.address, selectedRegions);
 }
 
+[[nodiscard]] std::vector<MemoryRegion> ParseArmlinkMemoryRegions(const std::vector<std::wstring>& lines)
+{
+    std::vector<MemoryRegion> regions;
+    const auto header = std::ranges::find(lines, std::wstring(ARLINK_MAP_HEADER));
+    if (header == lines.end()) return regions;
+
+    for (auto it = header + 1; it != lines.end(); ++it)
+    {
+        std::wsmatch match;
+        if (std::regex_match(*it, match, kArmlinkLoadRegionRegex))
+        {
+            regions.push_back({
+                .name = match[1].str(),
+                .origin = ParseHex(match[2].str()),
+                .length = ParseHex(match[3].str()),
+                .attrs = L"LR",
+            });
+        }
+        else if (std::regex_match(*it, match, kArmlinkExecRegionRegex))
+        {
+            regions.push_back({
+                .name = match[1].str(),
+                .origin = ParseHex(match[2].str()),
+                .length = ParseHex(match[3].str()),
+                .attrs = L"ER",
+            });
+        }
+        else if (!regions.empty() && !it->empty() && (*it)[0] != L' ')
+        {
+            break;
+        }
+    }
+    return regions;
+}
+
+[[nodiscard]] MapParseResult ParseArmlinkMapFile(const std::vector<std::wstring>& lines, const std::optional<std::wstring>& selectedRegion)
+{
+    const auto regions = ParseArmlinkMemoryRegions(lines);
+    const auto selectedRegions = GetCandidateRegions(regions, selectedRegion);
+
+    const auto header = std::ranges::find(lines, std::wstring(ARLINK_MAP_HEADER));
+    if (header == lines.end())
+    {
+        return { .selectedRegions = selectedRegions };
+    }
+
+    std::vector<OutputSection> sections;
+
+    for (auto it = header + 1; it != lines.end(); ++it)
+    {
+        if (it->empty()) continue;
+
+        if (!it->empty() && (*it)[0] != L' ') break;
+
+        std::wsmatch match;
+        if (std::regex_match(*it, match, kArmlinkExecRegionRegex))
+        {
+            continue;
+        }
+
+        if (std::regex_match(*it, match, kArmlinkPadRegex)) continue;
+
+        if (std::regex_match(*it, match, kArmlinkSectionPrefixRegex))
+        {
+            const ULONGLONG execAddr = ParseHex(match[1].str());
+            const ULONGLONG loadAddr = ParseHex(match[2].str());
+            const ULONGLONG size = ParseHex(match[3].str());
+            if (size == 0) continue;
+
+            const std::wstring rest = match[8].str();
+            const auto parts = SplitByMultiSpace(rest);
+            if (parts.size() < 2) continue;
+
+            const std::wstring sectionName = parts[0];
+            const std::wstring objectName = parts[1];
+
+            OutputSection section{
+                .name = sectionName,
+                .address = execAddr,
+                .size = size,
+            };
+            if (loadAddr != execAddr)
+            {
+                section.loadAddress = loadAddr;
+            }
+
+            if (!selectedRegions.empty() && FindRegion(execAddr, selectedRegions) == nullptr &&
+                (!section.loadAddress.has_value() || FindRegion(*section.loadAddress, selectedRegions) == nullptr))
+            {
+                continue;
+            }
+
+            std::wstring library = L"[objects]";
+            std::wstring object = objectName;
+
+            std::wsmatch libMatch;
+            if (std::regex_match(objectName, libMatch, kArmlinkLibObjectRegex))
+            {
+                library = libMatch[1].str();
+                object = libMatch[2].str();
+            }
+
+            Contribution contrib{
+                .subsection = sectionName,
+                .address = execAddr,
+                .size = size,
+                .library = library,
+                .object = object,
+            };
+            section.contributions.push_back(std::move(contrib));
+            sections.push_back(std::move(section));
+        }
+    }
+
+    return { .selectedRegions = selectedRegions, .sections = std::move(sections) };
+}
+
 [[nodiscard]] MapParseResult ParseMapFile(const std::wstring& mapPath, const std::optional<std::wstring>& selectedRegion)
 {
     const auto lines = ReadAllLines(mapPath);
+
+    const auto armlinkHeader = std::ranges::find(lines, std::wstring(ARLINK_MAP_HEADER));
+    if (armlinkHeader != lines.end())
+    {
+        return ParseArmlinkMapFile(lines, selectedRegion);
+    }
+
     const auto regions = ParseMemoryRegions(lines);
     const auto selectedRegions = GetCandidateRegions(regions, selectedRegion);
 
@@ -1940,8 +2097,15 @@ void FinalizeTree(CItem* item)
 
 std::vector<MapRegionInfo> GetMapRegions(const std::wstring& mapPath)
 {
+    const auto lines = ReadAllLines(mapPath);
+
+    const auto armlinkHeader = std::ranges::find(lines, std::wstring(ARLINK_MAP_HEADER));
+    const auto regions = armlinkHeader != lines.end()
+        ? ParseArmlinkMemoryRegions(lines)
+        : ParseMemoryRegions(lines);
+
     std::vector<MapRegionInfo> result;
-    for (const auto& region : ParseMemoryRegions(ReadAllLines(mapPath)))
+    for (const auto& region : regions)
     {
         result.push_back({
             .name = region.name,
@@ -2012,14 +2176,14 @@ void RemoveMapItemDetails(const CItem* root)
 CItem* LoadMapResults(const std::wstring& mapPath,
     const std::optional<std::wstring>& elfPath,
     const std::optional<std::wstring>& selectedRegion,
-    const std::function<void(const wchar_t*, int)>& progressCallback)
+    const std::function<void(const wchar_t*)>& progressCallback)
 {
-    auto reportProgress = [&](const wchar_t* msg, int percent)
+    auto reportProgress = [&](const wchar_t* msg)
     {
-        if (progressCallback) progressCallback(msg, percent);
+        if (progressCallback) progressCallback(msg);
     };
 
-    reportProgress(L"Loading map file...", 0);
+    reportProgress(L"Loading map file...");
     ClearMapItemDetails();
 
     const auto parsed = ParseMapFile(mapPath, selectedRegion);
@@ -2031,7 +2195,7 @@ CItem* LoadMapResults(const std::wstring& mapPath,
     const auto& sections = parsed.sections;
     const auto& selectedRegions = parsed.selectedRegions;
 
-    reportProgress(L"Loading ELF data...", 15);
+    reportProgress(L"Loading ELF data...");
     const auto elfData = ParseElfData(elfPath);
     const auto& symbols = elfData.symbols;
     std::unordered_map<std::wstring, std::vector<Symbol>, string_hash, std::equal_to<>> symbolsBySection;
@@ -2040,7 +2204,7 @@ CItem* LoadMapResults(const std::wstring& mapPath,
         symbolsBySection[symbol.sectionName].push_back(symbol);
     }
 
-    reportProgress(L"Building tree structure...", 40);
+    reportProgress(L"Building tree structure...");
     const auto rootName = std::filesystem::path(mapPath).filename().wstring();
     auto* root = new CItem(IT_DIRECTORY | ITF_ROOTITEM, rootName);
     root->SetAttributes(FILE_ATTRIBUTE_DIRECTORY);
@@ -2314,10 +2478,6 @@ CItem* LoadMapResults(const std::wstring& mapPath,
         }
     };
 
-    int totalSections = 0;
-    for (const auto& rb : regionBuckets) totalSections += static_cast<int>(rb.sections.size());
-    int processedSections = 0;
-
     for (const auto& regionBucket : regionBuckets)
     {
         ULONGLONG usedBytes = 0;
@@ -2343,9 +2503,6 @@ CItem* LoadMapResults(const std::wstring& mapPath,
         for (const auto* section : regionBucket.sections)
         {
             buildSectionNode(regionNode, *section);
-            processedSections++;
-            const int percent = 40 + (processedSections * 50 / std::max(totalSections, 1));
-            reportProgress(L"Building tree structure...", percent);
         }
 
         if (regionBucket.region != nullptr && usedBytes < regionBucket.region->length)
@@ -2354,7 +2511,7 @@ CItem* LoadMapResults(const std::wstring& mapPath,
         }
     }
 
-    reportProgress(L"Finalizing...", 90);
+    reportProgress(L"Finalizing...");
     FinalizeTree(root);
     return root;
 }
